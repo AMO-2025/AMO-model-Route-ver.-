@@ -7,6 +7,9 @@ from io import BytesIO
 import timm
 import face_recognition
 import numpy as np
+import os
+import requests
+from urllib.parse import urlparse
 
 class EmotionPredictor:
     def __init__(self, model_path, use_adapter=False):
@@ -20,7 +23,14 @@ class EmotionPredictor:
         model = timm.create_model('convnext_tiny_in22ft1k', pretrained=False, num_classes=len(self.emotion_labels))
         if self.use_adapter:
             self._inject_adapter(model)
-        state_dict = torch.load(model_path, map_location=self.device)
+
+        if model_path.startswith("http://") or model_path.startswith("https://"):
+            response = requests.get(model_path)
+            response.raise_for_status()  
+            state_dict = torch.load(BytesIO(response.content), map_location=self.device)
+        else:
+            state_dict = torch.load(model_path, map_location=self.device)
+
         model.load_state_dict(state_dict)
         model = model.to(self.device)
         model.eval()
@@ -50,15 +60,11 @@ class EmotionPredictor:
 
         cropped = img_np[top:bottom, left:right]
         
-        debug_image = Image.fromarray(cropped)
-        debug_image.show()
-    
         return Image.fromarray(cropped)
-
+    
     def _predict(self, image: Image.Image):
         face = self._crop_face(image)
         if face is None:
-            print("using full image")
             face = image
         input_tensor = self.transform(face).unsqueeze(0).to(self.device)
         with torch.no_grad():
